@@ -1,5 +1,7 @@
 # REXOD RX830-V120 프린터 제어 애플리케이션 (Flutter Windows)
 
+현재 usb 인식만 가능하면 프린터는 되지 않고 있다 
+
 C# Windows Forms 기반의 REXOD 프린터 샘플 애플리케이션을 Flutter Windows 데스크톱 애플리케이션으로 변환한 프로젝트입니다.
 
 ## 주요 기능
@@ -146,9 +148,5 @@ lib/
 - Visual Studio가 올바르게 설치되었는지 확인
 - `flutter clean` 후 다시 빌드 시도
 
-
-## 개발자 정보
-
 - **원본 C# 버전**: REXOD 프린터 샘플 애플리케이션
-- **Flutter 변환**: AI Assistant
 - **개발 일자**: 2025년 8월
