@@ -39,12 +39,12 @@ dependencies:
   flutter_libserialport: ^0.6.0
   
   # 상태 관리
-  provider: ^6.1.2
+  provider: ^6.1.5+1
   ffi: ^2.1.4
   win32: ^5.14.0
 
   # 설정 저장
-  shared_preferences: ^2.2.3
+  shared_preferences: ^2.5.3
   
   # 파일 선택
   file_picker: ^8.0.6
