@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // ← 로그 복사용
+import 'package:http/http.dart' as dio;
 import 'package:provider/provider.dart';
 import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 import 'services/real_printer_service.dart';
@@ -508,8 +509,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
                                       '샘플 영수증',
                                       MdiIcons.receipt,
                                           () async {
-
-                                            final url = 'https://qrcode.nijimori.kr/v1/print/orcode_receipt?orcode=https%3A%2F%2Fqrcode.nijimori.kr%2Fimages%2F2c6df4399d6051de2700.png';
+                                            final url = 'https://qrcode.nijimori.kr/v1/print/orcode_receipt?orcode=2c6df4399d6051de2700.png';
 
                                             // 기존 샘플 호출 주석 처리 후 ↓ 이걸로 교체
                                             final success = await printerService.printTicketInlineFromUrl(

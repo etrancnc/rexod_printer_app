@@ -182,6 +182,8 @@ class RealPrinterService extends ChangeNotifier {
 
   // ===== 연결 =====
   Future<bool> connect() async {
+
+
     if (_isConnecting) {
       _showMessage('이미 연결을 시도하고 있습니다.', MessageType.warning);
       return false;
@@ -307,6 +309,9 @@ class RealPrinterService extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+
+
+
   }
 
   // ===== 스풀러 경로: 간단 자가 테스트 =====
@@ -755,14 +760,15 @@ class RealPrinterService extends ChangeNotifier {
   }) async {
     try {
       // 1) GET
-      final resp = await http.get(Uri.parse(url)).timeout(timeout);
-      if (resp.statusCode != 200) {
-        _showMessage('데이터 요청 실패: HTTP ${resp.statusCode}', MessageType.error);
-        return false;
-      }
+      // final resp = await http.get(Uri.parse(url)).timeout(timeout);
+      // if (resp.statusCode != 200) {
+      //   _showMessage('데이터 요청 실패: HTTP ${resp.statusCode}', MessageType.error);
+      //   return false;
+      // }
 
       // 2) JSON 파싱
-      final dynamic decoded = jsonDecode(resp.body);
+      String str = '{"status":"ok","order_number":"41bf144d-55e2-42df-b916-aebe94bad33f","receipts":["************************************************\n\nN I J I M O R I\n\nSTUDIO ENTRANCE TICKET\n\n************************************************\n\n- 티켓번호 : 41bf144d-55e2-42df-b916-aebe94bad33f\n\n- 구매자명 : 김호균\n\n- 유효기간 : 2025-09-16 ~ 2026-09-15----------------------------------------\n\n[입장권 정보]\n\n\n[TICKET]----------------------------------------\n\n[결제 정보]\n\n- 결제수단 : card\n\n- 결제금액 : 20000\n\n- 승인번호 : UT0000113m01012509150041241500\n\n\n\n----------------------------------------\n\n[이용 안내]\n\n* 본 입장권은 QR코드 스캔 후 입장이 가능합니다.\n\n* QR코드 훼손 시 입장이 제한될 수 있습니다.\n\n* 환불/취소는 현장 직원에게 문의 바랍니다.\n\n\n————————————————————\n\n감사합니다! 니지모리 스튜디오\n\n고객센터 : 031-857-5557\n\n************************************************"],"qr_codes":[{"coupon_type":"TICKET","qr":"█▀▀▀▀▀▀▀██▀██▀█▀███▀▀▀▀▀▀▀█\n█ █▀▀▀█ █▀▄▀▄█▄ ▄██ █▀▀▀█ █\n█ █   █ █  ▄██▄▀▄▄█ █   █ █\n█ ▀▀▀▀▀ █ ▄▀▄▀█▀▄ █ ▀▀▀▀▀ █\n█▀█▀▀▀▀▀█▄ ▄  ▀█ ▄█▀▀▀▀▀███\n█ ▄▄█▀ ▀  ▀▄▀ █▄▀▄▀▀ █▀▀▄▀█\n█▄██▀▀▄▀ ▄▄█▄███ ▄█ ▀ ▀▀▄▀█\n█ ▄▀▀ ▄▀▀▀▄▄█▄ ▀▀  ▀▀█▀█▀▀█\n█ █ █  ▀▀  ▀█ ▄▀ ▀▀▀▀ ▀▀█▀█\n█▀▀▀▀▀▀▀█▄█ ▀▀███ █▀█ ▀▀▄▀█\n█ █▀▀▀█ █ ▀▀ ██▄  ▀▀▀ ▄▀▀ █\n█ █   █ █ ▄▀█▄  ██▀▄▄▄▀█▄ █\n█ ▀▀▀▀▀ █▀ ▀█ ▄▀▀▄█ ▄▄▄▀▀ █\n▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀"}],"expire_start_date":"2025-09-15","expire_end_date":"2026-09-14"}';
+      final dynamic decoded = jsonDecode(str);
       if (decoded is! Map<String, dynamic>) {
         _showMessage('응답 형식 오류: Map 형태가 아님', MessageType.error);
         return false;
