@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
-
 import '../models/printer_config.dart';
 import '../models/printer_status.dart';
 import 'winspool_raw.dart';
+import 'package:charset_converter/charset_converter.dart';
 
 /// 메시지 타입
 enum MessageType { info, success, warning, error }
@@ -143,6 +144,53 @@ class RealPrinterService extends ChangeNotifier {
     return ports;
   }
 
+  // 추가: 칸지 모드 해제 헬퍼
+  List<int> _fsCancelKanji() => [0x1C, 0x2E]; // FS .
+
+// 추가: 코드페이지 전환 헬퍼
+  List<int> _escSelectCodePage(int n) => [0x1B, 0x74, n]; // ESC t n
+
+  // 1) EUC-KR만 고정
+  Future<List<int>> _encodeKR(String text) async {
+    try {
+      return await CharsetConverter.encode('euc-kr', text);
+    } catch (_) {
+      // 폴백: 한글은 '?'로 대체
+      final safe = text.replaceAll(RegExp(r'[^\x00-\x7F]'), '?');
+      return latin1.encode(safe);
+    }
+  }
+
+  // 2) CP437 인코딩 도우미 (블록문자/아스키아트용)
+  Future<List<int>> _encodeCP437(String text) async {
+    const candidates = ['cp437', 'ibm437', '437', 'windows-437', 'x-ibm437'];
+    for (final name in candidates) {
+      try { return await CharsetConverter.encode(name, text); } catch (_) {}
+    }
+    final safe = text.replaceAll(RegExp(r'[^\x00-\x7F]'), '?');
+    return latin1.encode(safe);
+  }
+
+
+  static const List<int> _ESC_T_KOREAN = [0x1B, 0x74, 30]; // ESC t 30 (KSC-5601)
+  List<int> _escAlign(int n) => [0x1B, 0x61, n]; // 0:left, 1:center, 2:right
+
+  Future<void> _selectKoreanCodepage() async {
+    await _sendRaw(_ESC_T_KOREAN, docName: 'SET_CODEPAGE_KR');
+  }
+
+  Future<void> _printAsciiArtCp437(String art) async {
+    // 코드페이지 CP437로 전환 (ESC t 0)
+    await _sendRaw([0x1B, 0x74, 0x00], docName: 'SET_CODEPAGE_CP437');
+
+    // CP437로 인코딩해서 전송
+    final bytes = await CharsetConverter.encode('cp437', art);
+    await _sendRaw(bytes, docName: 'ASCII_ART_CP437');
+
+    // 다시 한글 코드페이지(ESC t 30)로 복귀
+    await _sendRaw([0x1B, 0x74, 30], docName: 'SET_CODEPAGE_KR');
+  }
+
   // ===== 연결 =====
   Future<bool> connect() async {
     if (_isConnecting) {
@@ -243,6 +291,7 @@ class RealPrinterService extends ChangeNotifier {
 
         // 초기화 + 응답 확인
         await _sendCommand(_INIT);
+        await _selectKoreanCodepage();
         await Future.delayed(const Duration(milliseconds: 200));
         final ok = await _checkPrinterResponse();
         if (!ok) {
@@ -421,20 +470,25 @@ class RealPrinterService extends ChangeNotifier {
 
   // ===== 인쇄 기능 =====
   Future<bool> _printTextInternal(String text, {int alignment = 0, int mode = 0}) async {
+    // 한국어 페이지 보장(USB/직렬 공통)
+    await _sendRaw([0x1B, 0x74, 30], docName: 'CODEPAGE_KR');
+
+    final kr = await _encodeKR(text);
+
     if (_useSpooler) {
       final bytes = <int>[
         0x1B, 0x61, alignment, // 정렬
-        0x1B, 0x21, mode,       // 모드
-        ...text.codeUnits,
+        0x1B, 0x21, mode, // 모드
+        ...kr, // ✅ 인코딩된 바이트만 사용
         ..._LINE_FEED,
-        0x1B, 0x21, 0x00,       // 모드 초기화
-        0x1B, 0x61, 0x00,       // 정렬 초기화
+        0x1B, 0x21, 0x00, // 모드 초기화
+        0x1B, 0x61, 0x00, // 정렬 초기화
       ];
-      return _sendRaw(bytes, docName: 'TEXT');
+      return _sendRaw(bytes, docName: 'TEXT-KR');
     } else {
       if (!await _sendCommand([0x1B, 0x61, alignment])) return false;
       if (!await _sendCommand([0x1B, 0x21, mode])) return false;
-      if (!await _sendCommand(text.codeUnits)) return false;
+      if (!await _sendRaw(kr, docName: 'TEXT-KR')) return false; // ✅
       if (!await _sendCommand(_LINE_FEED)) return false;
       if (!await _sendCommand([0x1B, 0x21, 0x00])) return false;
       if (!await _sendCommand([0x1B, 0x61, 0x00])) return false;
@@ -602,7 +656,7 @@ class RealPrinterService extends ChangeNotifier {
   }
 
   Future<bool> printSampleReceipt() async {
-    if (!(_useSpooler ? (_spool?.isOpen ?? false) : (_port?.isOpen ?? false))) {
+    if (!isConnected) {
       _showMessage('프린터가 연결되지 않았습니다.', MessageType.error);
       return false;
     }
@@ -616,52 +670,73 @@ class RealPrinterService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final b = <int>[]
-        ..addAll(_INIT)
-        ..addAll('REXOD CO.,LTD\n\n'.codeUnits)
-        ..addAll('1616, Daeryung Techno Town 19Cha 70,\n'.codeUnits)
-        ..addAll('Gasan digital 2-ro,Geumcheon-gu,\n'.codeUnits)
-        ..addAll('Seoul,Korea\n\n'.codeUnits)
-        ..addAll('RefSO#.               Receipt#:         87\n'.codeUnits)
-        ..addAll('01/01/2019               Store:       017A\n'.codeUnits)
-        ..addAll('Assoc: Admin           Cashier:      Admin\n\n'.codeUnits)
-        ..addAll(' Bill To : REXOD\n'.codeUnits)
-        ..addAll(' 1616, Daeryung Techno Town 19Cha 70      \n'.codeUnits)
-        ..addAll('    Gasan digital 2-ro, Geumcheon-gu      \n'.codeUnits)
-        ..addAll('                         Seoul,Korea      \n\n'.codeUnits)
-        ..addAll(' <<For Store>>\n\n'.codeUnits)
-        ..addAll('DCS       ITEM#    QTY   PRICE   EXT PRICE\n'.codeUnits)
-        ..addAll('------------------------------------------\n'.codeUnits)
-        ..addAll('Flame Grilled 33   1  14,000.00     14,000\n'.codeUnits)
-        ..addAll('Victoria\'s Filet\n'.codeUnits)
-        ..addAll('             22    1  48,000.00     48,000\n'.codeUnits)
-        ..addAll('------------------------------------------\n'.codeUnits)
-        ..addAll('         2 Unit(s)    Subtotal:     62,000\n'.codeUnits)
-        ..addAll('                10.000 %   Tax:      6,200\n'.codeUnits)
-        ..addAll('       RECEIPT TOTAL: 68,200\n'.codeUnits)
-        ..addAll('Tend:     68,200      \n'.codeUnits)
-        ..addAll('       Cash: 8,200\n'.codeUnits)
-        ..addAll('  Gift Cert: 10,000 #87654321\n'.codeUnits)
-        ..addAll('     CrCard: 50,000 Card\n'.codeUnits)
-        ..addAll('             **********9411 Exp 03/12\n\n'.codeUnits)
-        ..addAll('Signature\n\n'.codeUnits)
-        ..addAll('       We appreciate your business!\n'.codeUnits)
-        ..addAll(_LINE_FEED)
-        ..addAll(_LINE_FEED)
-        ..addAll(_CUT_PARTIAL);
+      final body = StringBuffer()
+        ..writeln('************************************************')
+        ..writeln('N I J I M O R I')
+        ..writeln('STUDIO ENTRANCE TICKET')
+        ..writeln('************************************************')
+        ..writeln('- 티켓번호')
+        ..writeln('  41bf144d-55e2-42df-b916-aebe94bad33f')
+        ..writeln('- 구매자명 : 김호균')
+        ..writeln('- 유효기간 : 2025-09-15 ~ 2026-09-14')
+        ..writeln()
+        ..writeln('------------------------------------------')
+        ..writeln('[입장권 정보]')
+        ..writeln('------------------------------------------');
 
-      final ok = await _sendRaw(b, docName: 'SAMPLE RECEIPT');
+      final asciiArt = StringBuffer()
+        ..writeln('█▀▀▀▀▀▀▀██▀██▀█▀███▀▀▀▀▀▀▀█')
+        ..writeln('█ █▀▀▀█ █▀▄▀▄█▄ ▄██ █▀▀▀█ █')
+        ..writeln('█ █   █ █  ▄██▄▀▄▄█ █   █ █')
+        ..writeln('█ ▀▀▀▀▀ █ ▄▀▄▀█▀▄ █ ▀▀▀▀▀ █')
+        ..writeln('█▀█▀▀▀▀▀█▄ ▄  ▀█ ▄█▀▀▀▀▀███')
+        ..writeln('█ ▄▄█▀ ▀  ▀▄▀ █▄▀▄▀▀ █▀▀▄▀█')
+        ..writeln('█▄██▀▀▄▀ ▄▄█▄███ ▄█ ▀ ▀▀▄▀█')
+        ..writeln('█ ▄▀▀ ▄▀▀▀▄▄█▄ ▀▀  ▀▀█▀█▀▀█')
+        ..writeln('█ █ █  ▀▀  ▀█ ▄▀ ▀▀▀▀ ▀▀█▀█')
+        ..writeln('█▀▀▀▀▀▀▀█▄█ ▀▀███ █▀█ ▀▀▄▀█')
+        ..writeln('█ █▀▀▀█ █ ▀▀ ██▄  ▀▀▀ ▄▀▀ █')
+        ..writeln('█ █   █ █ ▄▀█▄  ██▀▄▄▄▀█▄ █')
+        ..writeln('█ ▀▀▀▀▀ █▀ ▀█ ▄▀▀▄█ ▄▄▄▀▀ █')
+        ..writeln('▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀');
+
+      final bodyKR   = await _encodeKR(body.toString());
+      final art437   = await _encodeCP437(asciiArt.toString());
+
+      final b = BytesBuilder();
+      b.add(_INIT);
+
+      b.add(_escSelectCodePage(30)); // EUC-KR (KSC-5601)
+      b.add(bodyKR);
+
+      // 아스키아트 구간만 CP437로 전환 후 출력
+      b.add(_fsCancelKanji());       // FS .   ← 이게 진짜 중요해!
+      b.add(_escSelectCodePage(0));  // ESC t 0 = PC437 (모델 따라 16일 수도)
+
+      b.add(_escAlign(1)); // center
+      b.add(art437);
+
+      // 필요 시 다시 EUC-KR 복귀 (추가 텍스트가 없다면 생략 가능)
+      b.add(_escAlign(0));
+      b.add(_escSelectCodePage(30));
+
+      b.add(_LINE_FEED);
+      b.add(_LINE_FEED);
+      b.add(_CUT_PARTIAL);
+
+      final ok = await _sendRaw(b.toBytes(), docName: 'SAMPLE RECEIPT');
       _showMessage(ok ? '샘플 영수증 인쇄 완료' : '샘플 영수증 인쇄 실패',
           ok ? MessageType.success : MessageType.error);
+
       _isPrinting = false;
       notifyListeners();
-      return ok;
-    } catch (e) {
+      return ok;  } catch (e) {
       _showMessage('샘플 영수증 인쇄 실패: $e', MessageType.error);
       _isPrinting = false;
       notifyListeners();
       return false;
     }
+
   }
 
   Future<void> checkStatus() async {

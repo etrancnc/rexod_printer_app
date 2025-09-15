@@ -3,7 +3,6 @@ import 'package:flutter/services.dart'; // ← 로그 복사용
 import 'package:provider/provider.dart';
 import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 import 'services/real_printer_service.dart';
-import 'models/printer_config.dart';
 
 void main() {
   runApp(const MyApp());
@@ -444,7 +443,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
                                       MdiIcons.formatText,
                                           () async {
                                         final success = await printerService.printText(
-                                          'Normal\nDouble Width\nDouble Height\nDouble Width,Height\n',
+                                          '안녕하세요\n\nDouble Width\nDouble Height\nDouble Width,Height\n',
                                         );
                                         if (!success) {}
                                       },
@@ -475,6 +474,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
                                       printerService.isConnected && !printerService.isPrinting,
                                       isLoading: printerService.isPrinting,
                                     ),
+
                                     _buildFunctionButton(
                                       context,
                                       'QR코드 인쇄',
@@ -766,8 +766,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
       case MessageType.warning:
         return Colors.orange.shade50;
       case MessageType.info:
-      default:
-        return Colors.blue.shade50;
+      return Colors.blue.shade50;
     }
   }
 
@@ -780,8 +779,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
       case MessageType.warning:
         return Colors.orange.shade300;
       case MessageType.info:
-      default:
-        return Colors.blue.shade300;
+      return Colors.blue.shade300;
     }
   }
 
@@ -794,8 +792,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
       case MessageType.warning:
         return Colors.orange.shade800;
       case MessageType.info:
-      default:
-        return Colors.blue.shade800;
+      return Colors.blue.shade800;
     }
   }
 
@@ -808,8 +805,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
       case MessageType.warning:
         return Colors.orange.shade600;
       case MessageType.info:
-      default:
-        return Colors.blue.shade600;
+      return Colors.blue.shade600;
     }
   }
 
