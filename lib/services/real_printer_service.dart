@@ -179,18 +179,6 @@ class RealPrinterService extends ChangeNotifier {
     await _sendRaw(_ESC_T_KOREAN, docName: 'SET_CODEPAGE_KR');
   }
 
-  Future<void> _printAsciiArtCp437(String art) async {
-    // 코드페이지 CP437로 전환 (ESC t 0)
-    await _sendRaw([0x1B, 0x74, 0x00], docName: 'SET_CODEPAGE_CP437');
-
-    // CP437로 인코딩해서 전송
-    final bytes = await CharsetConverter.encode('cp437', art);
-    await _sendRaw(bytes, docName: 'ASCII_ART_CP437');
-
-    // 다시 한글 코드페이지(ESC t 30)로 복귀
-    await _sendRaw([0x1B, 0x74, 30], docName: 'SET_CODEPAGE_KR');
-  }
-
   // ===== 연결 =====
   Future<bool> connect() async {
     if (_isConnecting) {
