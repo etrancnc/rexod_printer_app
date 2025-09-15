@@ -46,6 +46,7 @@ dependencies:
   # 설정 저장
   shared_preferences: ^2.5.3
   charset_converter: ^ 2.3.0
+  http: ^1.2.2
 
   # 파일 선택
   file_picker: ^8.0.6

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
+import 'package:http/http.dart' as http;
 import '../models/printer_config.dart';
 import '../models/printer_status.dart';
 import 'winspool_raw.dart';
@@ -725,6 +726,167 @@ class RealPrinterService extends ChangeNotifier {
       return false;
     }
 
+  }
+
+  String _centerPadLine(String line, int cols) {
+    final l = line.replaceAll('\r', '');
+    final w = l.length; // 블록문자는 1칸 폭 가정
+    if (w >= cols) return l;
+    final pad = ((cols - w) / 2).floor();
+    return (' ' * pad) + l;
+  }
+
+
+  /// 본문 특수문자 안전치환(EUC-KR에서 깨질 수 있는 기호 치환)
+  String _sanitizeBody(String s) {
+    return s
+        .replaceAll('—', '-')
+        .replaceAll('–', '-')
+        .replaceAll('―', '-')
+        .replaceAll('·', '-')
+        .replaceAll('•', '*');
+  }
+
+  Future<bool> printTicketInlineFromUrl({
+    required String url,
+    int columns = 48,   // 프린터 열수(58mm: 32/42, 80mm: 48/64)
+    int cp437Index = 0, // 아트가 한자로 나오면 16으로 바꿔보기
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    try {
+      // 1) GET
+      final resp = await http.get(Uri.parse(url)).timeout(timeout);
+      if (resp.statusCode != 200) {
+        _showMessage('데이터 요청 실패: HTTP ${resp.statusCode}', MessageType.error);
+        return false;
+      }
+
+      // 2) JSON 파싱
+      final dynamic decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic>) {
+        _showMessage('응답 형식 오류: Map 형태가 아님', MessageType.error);
+        return false;
+      }
+
+      // 3) 인쇄 실행
+      return await printTicketInlineFromJson(
+        decoded,
+        columns: columns,
+        cp437Index: cp437Index,
+      );
+    } catch (e) {
+      _showMessage('영수증 데이터 로드 실패: $e', MessageType.error);
+      return false;
+    }
+  }
+
+  /// JSON 기반: [TICKET] 자리에 QR 아스키아트 삽입해서 출력
+  Future<bool> printTicketInlineFromJson(
+      Map<String, dynamic> j, {
+        int columns = 48,   // 프린터 열 수(58mm: 32/42, 80mm: 48/64)
+        int cp437Index = 0, // 일부 모델은 16이 CP437. 한자 나오면 16으로 바꿔봐.
+      }) async {
+    if (!isConnected) {
+      _showMessage('프린터가 연결되지 않았습니다.', MessageType.error);
+      return false;
+    }
+    if (_isPrinting) {
+      _showMessage('이미 인쇄 중입니다.', MessageType.warning);
+      return false;
+    }
+
+    try {
+      _isPrinting = true;
+      _showMessage('티켓 영수증을 인쇄하고 있습니다...', MessageType.info);
+      notifyListeners();
+
+      // 1) 본문 준비 (receipts[0] 우선)
+      final receipts = (j['receipts'] as List?)?.cast<String>() ?? const [];
+      String body = receipts.isNotEmpty && receipts.first.trim().isNotEmpty
+          ? receipts.first
+          : '';
+
+      body = _sanitizeBody(body);
+
+      // 2) QR 맵 준비 (coupon_type -> 아트)
+      final qrList = (j['qr_codes'] as List?)
+          ?.whereType<Map<String, dynamic>>()
+          .toList() ??
+          const [];
+      final Map<String, String> qrMap = {
+        for (final m in qrList)
+          (m['coupon_type'] ?? '').toString(): (m['qr'] ?? '').toString(),
+      };
+
+      // 3) 본문을 [TYPE] 플레이스홀더 기준으로 분해하면서 출력 버퍼 구성
+      //    현재 요구는 [TICKET]만 처리지만, 일반화해서 [COUPON_TYPE] 전부 치환 가능
+      final placeholderRegex = RegExp(r'\[(\w+)\]');
+      final b = BytesBuilder();
+
+      // 초기화 + 한글 코드페이지(EUC-KR)
+      b.add(_INIT);
+      b.add(_escSelectCodePage(30)); // KSC-5601 (EUC-KR)
+
+      int last = 0;
+      final matches = placeholderRegex.allMatches(body).toList();
+
+      for (final m in matches) {
+        // (a) 플레이스홀더 이전의 한글 본문 출력
+        final before = body.substring(last, m.start);
+        if (before.isNotEmpty) {
+          b.add(await _encodeKR(before));
+        }
+
+        // (b) 플레이스홀더 → QR 아트 삽입
+        final key = m.group(1) ?? ''; // 예: 'TICKET'
+        final qrArt = qrMap[key] ?? ''; // 해당 타입 없으면 빈 문자열
+
+        if (qrArt.isNotEmpty) {
+          // CP437 모드로 전환
+          b.add(_fsCancelKanji());              // FS .
+          b.add(_escSelectCodePage(cp437Index));// ESC t n (CP437)
+
+          // 가운데 정렬(명령 + 라인 패딩)
+          b.add(_escAlign(1));
+          final padded = qrArt
+              .split('\n')
+              .where((e) => e.trim().isNotEmpty)
+              .map((line) => _centerPadLine(line, columns))
+              .join('\n');
+          b.add(await _encodeCP437('$padded\n'));
+          b.add(_escAlign(0));
+
+          // 다시 EUC-KR 복귀
+          b.add(_escSelectCodePage(30));
+        }
+        // (c) 다음 탐색 시작점 이동
+        last = m.end;
+      }
+
+      // (d) 마지막 꼬리 한글 본문
+      final tail = body.substring(last);
+      if (tail.isNotEmpty) {
+        b.add(await _encodeKR(tail));
+      }
+
+      // 마무리 컷팅
+      b.add(_LINE_FEED);
+      b.add(_LINE_FEED);
+      b.add(_CUT_PARTIAL);
+
+      final ok = await _sendRaw(b.toBytes(), docName: 'TICKET_INLINE');
+      _showMessage(ok ? '티켓 인쇄 완료' : '티켓 인쇄 실패',
+          ok ? MessageType.success : MessageType.error);
+
+      _isPrinting = false;
+      notifyListeners();
+      return ok;
+    } catch (e) {
+      _showMessage('티켓 인쇄 실패: $e', MessageType.error);
+      _isPrinting = false;
+      notifyListeners();
+      return false;
+    }
   }
 
   Future<void> checkStatus() async {

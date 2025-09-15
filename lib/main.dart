@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // ← 로그 복사용
 import 'package:provider/provider.dart';
@@ -506,8 +508,15 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
                                       '샘플 영수증',
                                       MdiIcons.receipt,
                                           () async {
-                                        final success =
-                                        await printerService.printSampleReceipt();
+
+                                            final url = 'https://qrcode.nijimori.kr/v1/print/orcode_receipt?orcode=https%3A%2F%2Fqrcode.nijimori.kr%2Fimages%2F2c6df4399d6051de2700.png';
+
+                                            // 기존 샘플 호출 주석 처리 후 ↓ 이걸로 교체
+                                            final success = await printerService.printTicketInlineFromUrl(
+                                              url: url,
+                                              columns: 48,      // 80mm 보통 48, 58mm면 32/42 중 기기 맞게
+                                              cp437Index: 0,    // 한자 나오면 16으로 바꿔서 재시도
+                                            );
                                         if (!success) {}
                                       },
                                       printerService.isConnected && !printerService.isPrinting,
